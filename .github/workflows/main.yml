@@ -10,53 +10,28 @@ on:
 jobs:
   update-ndvi:
     runs-on: ubuntu-latest
-    
+    # Utiliser l'image rocker/geospatial qui contient R + librairies spatiales pré-installées
+    container:
+      image: rocker/geospatial:4.3.0
+      
     steps:
     - name: Checkout du repository
       uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-    
-    - name: Setup R
-      uses: r-lib/actions/setup-r@v2
-      with:
-        r-version: '4.3.0'
     
     - name: Cache les packages R
       uses: actions/cache@v3
       with:
-        path: ~/R/libs
-        key: ${{ runner.os }}-r-${{ hashFiles('**/DESCRIPTION') }}
+        path: /usr/local/lib/R/site-library
+        key: ${{ runner.os }}-r-geospatial-${{ hashFiles('**/DESCRIPTION', '**/*.R') }}
         restore-keys: |
-          ${{ runner.os }}-r-
+          ${{ runner.os }}-r-geospatial-
     
-    - name: Installer les dépendances système
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          libgdal-dev \
-          libgeos-dev \
-          libproj-dev \
-          libudunits2-dev \
-          libcurl4-openssl-dev \
-          libssl-dev \
-          libxml2-dev \
-          libharfbuzz-dev \
-          libfribidi-dev
-    
-    - name: Installer les packages R
+    - name: Installer les packages R manquants
       run: |
         Rscript -e "
           options(repos = c(CRAN = 'https://cloud.r-project.org'))
-          install_if_missing <- function(pkg) {
-            if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
-              install.packages(pkg, dependencies = TRUE)
-            }
-          }
-          packages <- c('rstac', 'terra', 'sf', 'ggplot2', 'ggspatial')
-          for (pkg in packages) {
-            install_if_missing(pkg)
-          }
+          packages <- c('rstac', 'ggspatial')
+          install.packages(packages, dependencies = TRUE, Ncpus = 2)
         "
     
     - name: Vérifier et extraire le NDVI le plus récent
@@ -73,8 +48,9 @@ jobs:
     - name: Vérifier les changements
       id: verify_changes
       run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
+        git config --global --add safe.directory /__w/ndvi/ndvi
+        git config --global user.email "action@github.com"
+        git config --global user.name "GitHub Action"
         git add -A
         git diff --staged --quiet || echo "changes=true" >> $GITHUB_OUTPUT
     
@@ -83,8 +59,6 @@ jobs:
       run: |
         git commit -m "Mise à jour automatique NDVI - $(date +'%Y-%m-%d %H:%M:%S')"
         git push
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
     - name: Notification - Aucune nouvelle image
       if: steps.verify_changes.outputs.changes != 'true'
